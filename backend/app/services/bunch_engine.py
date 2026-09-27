@@ -20,6 +20,10 @@ def classify_gap(gap_min: float, planned_headway_min: float, bunch_threshold: fl
         return ("large_gap", f"间隔 {gap_min:.1f} 分钟超过大间隔阈值 {large_threshold}，建议前车减速或加发。")
     return ("normal", f"间隔接近计划 {planned_headway_min:.1f} 分钟，保持即可。")
 
+def exclude_skipped(arrivals: list[dict], skipped_by_trip: dict[str, set[str]]) -> list[dict]:
+    """剔除越站班次在越站站点的记录；其余站该班次照常参与。"""
+    return [a for a in arrivals if a["stop_name"] not in skipped_by_trip.get(a["trip_no"], set())]
+
 def detect_bunching(arrivals: list[dict], planned_headway_min: float, bunch_threshold: float, large_threshold: float) -> list[GapEvent]:
     by_stop: dict[str, list[dict]] = {}
     for a in arrivals:
