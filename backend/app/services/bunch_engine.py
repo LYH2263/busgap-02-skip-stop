@@ -20,9 +20,24 @@ def classify_gap(gap_min: float, planned_headway_min: float, bunch_threshold: fl
         return ("large_gap", f"间隔 {gap_min:.1f} 分钟超过大间隔阈值 {large_threshold}，建议前车减速或加发。")
     return ("normal", f"间隔接近计划 {planned_headway_min:.1f} 分钟，保持即可。")
 
-def detect_bunching(arrivals: list[dict], planned_headway_min: float, bunch_threshold: float, large_threshold: float) -> list[GapEvent]:
+def detect_bunching(
+    arrivals: list[dict],
+    planned_headway_min: float,
+    bunch_threshold: float,
+    large_threshold: float,
+    skipped: set[tuple[str, str]] | None = None,
+) -> list[GapEvent]:
+    """检测各站相邻到站班次的间隔。
+
+    skipped 为 (trip_no, stop_name) 集合：登记越站的班次不出现在该站的
+    到站序列中，其前后仍在该站停靠的班次直接相邻计算；未越站的站点，
+    该班次照常参与配对。
+    """
+    skipped = skipped or set()
     by_stop: dict[str, list[dict]] = {}
     for a in arrivals:
+        if (a["trip_no"], a["stop_name"]) in skipped:
+            continue
         by_stop.setdefault(a["stop_name"], []).append(a)
     events: list[GapEvent] = []
     for stop, items in by_stop.items():

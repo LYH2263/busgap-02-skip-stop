@@ -4,9 +4,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models.models import Arrival, BunchReport, Line, Trip
+from app.models.models import Arrival, BunchReport, Line, SkipStop, Trip
 from app.services.bunch_engine import detect_bunching, events_to_dicts
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+def _skip_set(db: Session, trip_ids: list[int], trip_no_map: dict[int, str]) -> set[tuple[str, str]]:
+    if not trip_ids:
+        return set()
+    rows = db.scalars(select(SkipStop).where(SkipStop.trip_id.in_(trip_ids))).all()
+    return {(trip_no_map[r.trip_id], r.stop_name) for r in rows}
 
 @router.get("")
 def list_reports(db: Session = Depends(get_db)):
@@ -21,9 +27,12 @@ def run_detection(line_id: int, stop_name: str | None = None, db: Session = Depe
     trips = db.scalars(select(Trip).where(Trip.line_id == line_id)).all()
     trip_ids = [t.id for t in trips]
     trip_no_map = {t.id: t.trip_no for t in trips}
+    skipped = _skip_set(db, trip_ids, trip_no_map)
     arrivals = db.scalars(select(Arrival).where(Arrival.trip_id.in_(trip_ids))).all()
     payload = [{"stop_name": a.stop_name, "trip_no": trip_no_map[a.trip_id], "actual_arrive": a.actual_arrive}
-               for a in arrivals if stop_name is None or a.stop_name == stop_name]
+               for a in arrivals
+               if (stop_name is None or a.stop_name == stop_name)
+               and (trip_no_map[a.trip_id], a.stop_name) not in skipped]
     events = detect_bunching(payload, line.planned_headway_min, line.bunch_threshold, line.large_threshold)
     data = events_to_dicts(events)
     report = BunchReport(line_id=line_id, stop_name=stop_name or "*", created_at=datetime.utcnow(),
@@ -41,8 +50,12 @@ def timeline(line_id: int, stop_name: str = "市民中心", db: Session = Depend
     trips = db.scalars(select(Trip).where(Trip.line_id == line_id)).all()
     trip_ids = [t.id for t in trips]
     trip_no_map = {t.id: t.trip_no for t in trips}
-    arrivals = sorted(db.scalars(select(Arrival).where(Arrival.trip_id.in_(trip_ids), Arrival.stop_name == stop_name)).all(),
-                      key=lambda a: a.actual_arrive)
+    skip_trip_ids = {r.trip_id for r in db.scalars(
+        select(SkipStop).where(SkipStop.trip_id.in_(trip_ids), SkipStop.stop_name == stop_name)).all()} if trip_ids else set()
+    arrivals = sorted(
+        (a for a in db.scalars(select(Arrival).where(Arrival.trip_id.in_(trip_ids), Arrival.stop_name == stop_name)).all()
+         if a.trip_id not in skip_trip_ids),
+        key=lambda a: a.actual_arrive)
     if not arrivals: return {"stop_name": stop_name, "marks": []}
     t0 = arrivals[0].actual_arrive
     span = max((arrivals[-1].actual_arrive - t0).total_seconds(), 1)

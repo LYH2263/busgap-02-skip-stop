@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -31,6 +31,15 @@ class Arrival(Base):
     stop_seq: Mapped[int] = mapped_column(Integer)
     actual_arrive: Mapped[datetime] = mapped_column(DateTime)
     trip: Mapped["Trip"] = relationship(back_populates="arrivals")
+
+
+class SkipStop(Base):
+    __tablename__ = "skip_stops"
+    __table_args__ = (UniqueConstraint("trip_id", "stop_name", name="uq_skip_trip_stop"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("trips.id"))
+    stop_name: Mapped[str] = mapped_column(String(64))
+    trip: Mapped["Trip"] = relationship()
 
 class BunchReport(Base):
     __tablename__ = "bunch_reports"
